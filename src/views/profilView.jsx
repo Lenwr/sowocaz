@@ -112,7 +112,7 @@ const [selected , setSelected] = useState()
         </div>
 
         {/* Tags */}
-        <h3 className="font-semibold text-base my-4">Liste des dimensions</h3>
+        <h3 className="font-semibold text-base my-4">Cliquez sur la dimension </h3>
         <div className="flex justify-around flex-wrap gap-4 mt-4">
           {tagsData.map((tag) => (
           <span
@@ -121,7 +121,7 @@ const [selected , setSelected] = useState()
             document.getElementById('my_modal_1').showModal();
           }}
           key={tag.nom}
-          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs"
+          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-l text-xs"
         >
           {tag.nom}
         </span>
