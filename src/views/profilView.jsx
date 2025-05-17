@@ -60,7 +60,8 @@ const [selected , setSelected] = useState()
 
       {/* Main Info */}
       <div className="pt-16 pb-4 text-center px-4">
-        <h1 className="text-xl font-semibold text-gray-800">Sow Ocaz</h1>
+        <h2 className="text-xl font-semibold text-gray-800">Sow Ocaz</h2>
+        <h1 className="text-[#07c2e5]  font-bold">07 81 70 13 84</h1>
         <p className="text-sm text-blue-600"></p>
         <p className="text-sm text-gray-500 mt-1"></p>
 
