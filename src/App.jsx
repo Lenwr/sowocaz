@@ -1,11 +1,33 @@
 import React from "react";
-import Profil from "./views/profilView";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Profil from "./views/profilView.jsx";
+import AdminDashboard from "./Admin/AdminDashboard";
+import ProtectedRoute from "./components/ProtectedRoutes";
+import LoginPage from "./views/LoginPage";
 
 const App = () => {
   return (
-    <div className="w-screen min-h-screen p-1 bg-white ">
-     <Profil />
-    </div>
+    <Router>
+      <div className="w-screen min-h-screen bg-white">
+        <Routes>
+          {/* Page publique */}
+          <Route path="/" element={<Profil />} />
+
+          {/* Page de connexion */}
+          <Route path="/login" element={<LoginPage />} />
+
+          {/* Dashboard admin sécurisé */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </div>
+    </Router>
   );
 };
 
