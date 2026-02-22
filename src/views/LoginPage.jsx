@@ -6,17 +6,23 @@ import { auth } from "../firebaseConfig";
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setLoading(true);
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      localStorage.setItem("adminAuth", "true");
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      // ✅ pas besoin de localStorage: Firestore check request.auth (Firebase Auth)
       navigate("/admin");
     } catch (error) {
-      console.error(error);
-      alert("Échec de la connexion : vérifie ton email et mot de passe.");
+      console.error("🔥 Login error:", error);
+      alert(`Échec connexion: ${error?.code || ""} ${error?.message || ""}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -31,6 +37,7 @@ const LoginPage = () => {
           alt="Sow Ocaz"
           className="w-16 h-16 mx-auto rounded-full mb-4 shadow-md"
         />
+
         <h2 className="text-xl font-bold mb-2 text-gray-800">
           Connexion Administrateur
         </h2>
@@ -46,6 +53,7 @@ const LoginPage = () => {
           className="border border-gray-300 rounded-md w-full p-2 mb-3 text-black focus:outline-none"
           required
         />
+
         <input
           type="password"
           placeholder="Mot de passe"
@@ -57,9 +65,10 @@ const LoginPage = () => {
 
         <button
           type="submit"
-          className="bg-[#07c2e5] text-white py-2 rounded-md w-full hover:bg-[#06a0bd]"
+          disabled={loading}
+          className="bg-[#07c2e5] text-white py-2 rounded-md w-full hover:bg-[#06a0bd] disabled:opacity-50"
         >
-          Se connecter
+          {loading ? "Connexion..." : "Se connecter"}
         </button>
       </form>
     </div>

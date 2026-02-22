@@ -55,38 +55,32 @@ const extractDims = (dimensions) => {
 
 const AdminDashboard = () => {
   const [produits, setProduits] = useState([]);
-
-  const [form, setForm] = useState({
-    dimensions: "",
-    image: "",
-    prix: "",
-  });
+  const [form, setForm] = useState({ dimensions: "", image: "", prix: "" });
 
   const [editId, setEditId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null);
+
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState(null);
 
   const produitsRef = useMemo(() => collection(db, "produits"), []);
 
-  // ✅ Auth debug (tes rules exigent request.auth != null)
+  // ✅ Auth debug
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       setAuthReady(true);
-      console.log(
-        "AUTH STATE:",
-        user ? `✅ ${user.uid} ${user.email || ""}` : "❌ null"
-      );
+      console.log("AUTH STATE:", user ? `✅ ${user.uid}` : "❌ null");
     });
     return () => unsub();
   }, []);
 
-  // --- Récupérer la liste des produits ---
   const fetchProduits = async () => {
     const snapshot = await getDocs(produitsRef);
     const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // option : tri du + récent au + ancien si createdAt existe
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     setProduits(list);
   };
 
@@ -95,11 +89,9 @@ const AdminDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Gestion des champs ---
   const handleChange = (e) =>
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
-  // --- Upload image ---
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -126,19 +118,14 @@ const AdminDashboard = () => {
     }
   };
 
-  // --- Ajouter / Modifier ---
   const handleSave = async () => {
-    console.log("🟦 CLICK SAVE", { ...form, hasImage: !!form.image });
-
     if (!form.dimensions.trim() || !form.image.trim() || !form.prix.trim()) {
       alert("⚠️ Dimensions, image et prix sont obligatoires !");
       return;
     }
 
-    // 🔥 obligatoire avec tes rules
     if (!auth.currentUser) {
       alert("❌ Tu n'es pas connecté Firebase Auth. Firestore va refuser.");
-      console.log("AUTH currentUser = null (rules -> write denied)");
       return;
     }
 
@@ -152,20 +139,15 @@ const AdminDashboard = () => {
       createdAt: editId ? undefined : Date.now(),
       updatedAt: Date.now(),
     };
-
-    // clean undefined
     Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
 
     try {
-      console.log("➡️ Firestore write start:", data);
-
       if (editId) {
         await updateDoc(doc(db, "produits", editId), data);
         setEditId(null);
         alert("✅ Produit mis à jour !");
       } else {
-        const docRef = await addDoc(collection(db, "produits"), data);
-        console.log("✅ Firestore doc created:", docRef.id);
+        await addDoc(collection(db, "produits"), data);
         alert("✅ Produit ajouté !");
       }
 
@@ -178,7 +160,6 @@ const AdminDashboard = () => {
     }
   };
 
-  // --- Edit ---
   const handleEdit = (p) => {
     setForm({
       dimensions: p.dimensions || "",
@@ -190,20 +171,18 @@ const AdminDashboard = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // --- Delete ---
   const handleDelete = async (id) => {
-    if (confirm("Voulez-vous vraiment supprimer ce produit ?")) {
-      try {
-        await deleteDoc(doc(db, "produits", id));
-        await fetchProduits();
-      } catch (err) {
-        console.error("🔥 Firestore delete failed:", err);
-        alert(`❌ Firestore delete: ${err?.code || ""} ${err?.message || err}`);
-      }
+    if (!confirm("Voulez-vous vraiment supprimer ce produit ?")) return;
+
+    try {
+      await deleteDoc(doc(db, "produits", id));
+      await fetchProduits();
+    } catch (err) {
+      console.error("🔥 Firestore delete failed:", err);
+      alert(`❌ Firestore delete: ${err?.code || ""} ${err?.message || err}`);
     }
   };
 
-  // --- Logout ---
   const handleLogout = async () => {
     await signOut(auth);
     localStorage.removeItem("adminAuth");
@@ -211,196 +190,288 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f9fafb] p-6 relative">
-      <button
-        onClick={handleLogout}
-        className="absolute top-4 right-6 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-md"
-      >
-        🔐 Déconnexion
-      </button>
+    <div className="min-h-screen bg-[#f9fafb]">
+      {/* Header sticky responsive */}
+      <div className="sticky top-0 z-20 bg-[#f9fafb]/80 backdrop-blur border-b border-gray-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#0d0d1a]">
+              Dashboard Sow Ocaz ⚙️
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-500">
+              Gestion des produits (dimensions / prix / image)
+            </p>
+          </div>
 
-      <h1 className="text-3xl font-bold text-center text-[#0d0d1a] mb-6">
-        Dashboard Sow Ocaz ⚙️
-      </h1>
-
-      {/* ✅ État auth (debug visible) */}
-      <div className="max-w-2xl mx-auto mb-6">
-        <div className="bg-white border border-gray-200 rounded-xl p-4 text-sm">
-          <p className="text-gray-700">
-            Auth Firebase :{" "}
-            {authReady ? (
-              authUser ? (
-                <span className="text-green-600 font-semibold">
-                  connecté ({authUser.email || authUser.uid})
-                </span>
-              ) : (
-                <span className="text-red-600 font-semibold">non connecté</span>
-              )
-            ) : (
-              <span className="text-gray-500">chargement…</span>
-            )}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            Tes rules Firestore demandent <code>request.auth != null</code> pour
-            écrire.
-          </p>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg"
+          >
+            🔐 Déconnexion
+          </button>
         </div>
       </div>
 
-      {/* LISTE */}
-      <div className="max-w-6xl mx-auto mb-10">
-        <h2 className="font-semibold text-lg text-gray-800 mb-4">
-          🧾 Produits enregistrés ({produits.length})
-        </h2>
-
-        {produits.length === 0 ? (
-          <p className="text-gray-500 text-sm text-center">
-            Aucun produit enregistré pour le moment.
-          </p>
-        ) : (
-          <div className="overflow-x-auto bg-white border border-gray-200 rounded-xl shadow-sm">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 text-gray-700">
-                <tr>
-                  <th className="text-left p-3">Image</th>
-                  <th className="text-left p-3">Dimensions</th>
-                  <th className="text-left p-3">Prix</th>
-                  <th className="text-right p-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {produits.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="p-3">
-                      {p.image ? (
-                        <img
-                          src={p.image}
-                          alt={p.dimensions}
-                          className="h-12 w-12 object-cover rounded-md border"
-                        />
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="p-3 font-medium text-gray-900">
-                      {p.dimensions || "—"}
-                    </td>
-                    <td className="p-3 text-[#07c2e5] font-semibold">
-                      {p.prix || "—"}
-                    </td>
-                    <td className="p-3">
-                      <div className="flex justify-end gap-3">
-                        <button
-                          onClick={() => handleEdit(p)}
-                          className="text-[#07c2e5] hover:underline"
-                        >
-                          ✏️ Modifier
-                        </button>
-                        <button
-                          onClick={() => handleDelete(p.id)}
-                          className="text-red-500 hover:underline"
-                        >
-                          🗑️ Supprimer
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        {/* Auth badge */}
+        <div className="mb-6">
+          <div className="bg-white border border-gray-200 rounded-2xl p-4 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <p className="text-gray-700">
+              {authReady ? (
+                authUser ? (
+                  <span className="text-green-600 font-semibold">
+                    connecté ({authUser.email || authUser.uid})
+                  </span>
+                ) : (
+                  <span className="text-red-600 font-semibold">non connecté</span>
+                )
+              ) : (
+                <span className="text-gray-500">chargement…</span>
+              )}
+            </p>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* FORM */}
-      <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-gray-800">
-          {editId ? "✏️ Modifier un produit" : "➕ Ajouter un produit"}
-        </h2>
-
-        <div className="grid md:grid-cols-2 gap-4">
-          {/* Dimensions */}
-          <div className="md:col-span-2">
-            <label className="text-sm font-medium text-gray-700">
-              Dimensions *
-            </label>
-            <input
-              type="text"
-              name="dimensions"
-              value={form.dimensions}
-              onChange={handleChange}
-              placeholder='Ex : "85L/200H"'
-              className="mt-1 border border-gray-300 rounded-md w-full p-2 text-gray-900"
-            />
-          </div>
-
-          {/* Prix */}
-          <div className="md:col-span-2">
-            <label className="text-sm font-medium text-gray-700">Prix *</label>
-            <input
-              type="text"
-              name="prix"
-              value={form.prix}
-              onChange={handleChange}
-              placeholder="Ex : 200 €"
-              className="mt-1 border border-gray-300 rounded-md w-full p-2 text-gray-900"
-            />
-          </div>
-
-          {/* Upload image */}
-          <div className="md:col-span-2 border border-gray-300 rounded-md p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-gray-700">Image *</p>
-                <p className="text-xs text-gray-500">
-                  Upload Firebase Storage ou colle une URL
-                </p>
-              </div>
-
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleFileUpload}
-                className="text-sm text-gray-900"
-              />
+        {/* FORM responsive */}
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-6 mb-8">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
+                {editId ? "✏️ Modifier un produit" : "➕ Ajouter un produit"}
+              </h2>
+              <p className="text-xs sm:text-sm text-gray-500">
+                Champs obligatoires : dimensions, prix, image
+              </p>
             </div>
 
-            {uploading && (
-              <p className="text-xs text-gray-500 mt-2">
-                Upload en cours...
-              </p>
+            {editId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditId(null);
+                  setForm({ dimensions: "", image: "", prix: "" });
+                  setPreview(null);
+                }}
+                className="text-xs sm:text-sm text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 px-3 py-2 rounded-lg"
+              >
+                Annuler
+              </button>
             )}
+          </div>
 
-            <div className="mt-3 grid md:grid-cols-[1fr_auto] gap-3 items-start">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Dimensions */}
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-gray-700">
+                Dimensions *
+              </label>
               <input
                 type="text"
-                name="image"
-                placeholder="URL de l'image"
-                value={form.image}
+                name="dimensions"
+                value={form.dimensions}
                 onChange={handleChange}
-                className="border border-gray-300 rounded-md w-full p-2 text-gray-900"
+                placeholder='Ex : "85L/200H"'
+                className="mt-1 border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40"
               />
+            </div>
 
-              {(preview || form.image) && (
-                <img
-                  src={preview || form.image}
-                  alt="aperçu"
-                  className="h-24 w-24 object-cover rounded-md border"
+            {/* Prix */}
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-gray-700">Prix *</label>
+              <input
+                type="text"
+                name="prix"
+                value={form.prix}
+                onChange={handleChange}
+                placeholder="Ex : 200 €"
+                className="mt-1 border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40"
+              />
+            </div>
+
+            {/* Image */}
+            <div className="sm:col-span-2 border border-gray-200 rounded-2xl p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Image *</p>
+                  <p className="text-xs text-gray-500">
+                    Upload Storage ou colle une URL
+                  </p>
+                </div>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                  className="text-sm text-gray-900"
                 />
+              </div>
+
+              {uploading && (
+                <p className="text-xs text-gray-500 mt-2">Upload en cours...</p>
               )}
+
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-start">
+                <input
+                  type="text"
+                  name="image"
+                  placeholder="URL de l'image"
+                  value={form.image}
+                  onChange={handleChange}
+                  className="border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40"
+                />
+
+                {(preview || form.image) && (
+                  <img
+                    src={preview || form.image}
+                    alt="aperçu"
+                    className="w-full sm:w-28 h-44 sm:h-28 object-cover rounded-xl border"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={uploading}
+                className="bg-[#07c2e5] text-white px-4 py-3 rounded-xl w-full hover:bg-[#06a0bd] transition disabled:opacity-50 font-semibold"
+              >
+                {editId ? "💾 Enregistrer" : "🚀 Ajouter"}
+              </button>
             </div>
           </div>
+        </div>
 
-          <div className="md:col-span-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={uploading}
-              className="bg-[#07c2e5] text-white px-4 py-2 rounded-md w-full hover:bg-[#06a0bd] transition disabled:opacity-50"
-            >
-              {editId ? "💾 Enregistrer" : "🚀 Ajouter"}
-            </button>
+        {/* LIST responsive */}
+        <div className="mb-10">
+          <div className="flex items-end justify-between gap-4 mb-4">
+            <h2 className="font-semibold text-base sm:text-lg text-gray-800">
+              🧾 Produits enregistrés ({produits.length})
+            </h2>
           </div>
+
+          {/* Mobile cards */}
+          <div className="grid grid-cols-1 sm:hidden gap-4">
+            {produits.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center">
+                Aucun produit enregistré pour le moment.
+              </p>
+            ) : (
+              produits.map((p) => (
+                <div
+                  key={p.id}
+                  className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm"
+                >
+                  <div className="flex gap-3">
+                    {p.image ? (
+                      <img
+                        src={p.image}
+                        alt={p.dimensions}
+                        className="w-20 h-20 object-cover rounded-xl border"
+                      />
+                    ) : (
+                      <div className="w-20 h-20 rounded-xl border bg-gray-50" />
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-900 truncate">
+                        {p.dimensions || "—"}
+                      </p>
+                      <p className="text-sm text-[#07c2e5] font-bold mt-1">
+                        {p.prix || "—"}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        ID: <span className="font-mono">{p.id}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(p)}
+                      className="flex-1 border border-gray-200 bg-white hover:bg-gray-50 text-gray-800 px-3 py-2 rounded-xl text-sm"
+                    >
+                      ✏️ Modifier
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(p.id)}
+                      className="flex-1 border border-red-200 bg-white hover:bg-red-50 text-red-600 px-3 py-2 rounded-xl text-sm"
+                    >
+                      🗑️ Supprimer
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop table */}
+          {produits.length > 0 && (
+            <div className="hidden sm:block overflow-x-auto bg-white border border-gray-200 rounded-2xl shadow-sm">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-gray-700">
+                  <tr>
+                    <th className="text-left p-3">Image</th>
+                    <th className="text-left p-3">Dimensions</th>
+                    <th className="text-left p-3">Prix</th>
+                    <th className="text-right p-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {produits.map((p) => (
+                    <tr key={p.id} className="hover:bg-gray-50">
+                      <td className="p-3">
+                        {p.image ? (
+                          <img
+                            src={p.image}
+                            alt={p.dimensions}
+                            className="h-12 w-12 object-cover rounded-lg border"
+                          />
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="p-3 font-medium text-gray-900">
+                        {p.dimensions || "—"}
+                      </td>
+                      <td className="p-3 text-[#07c2e5] font-semibold">
+                        {p.prix || "—"}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(p)}
+                            className="text-[#07c2e5] hover:underline"
+                          >
+                            ✏️ Modifier
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(p.id)}
+                            className="text-red-500 hover:underline"
+                          >
+                            🗑️ Supprimer
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {produits.length === 0 && (
+            <div className="hidden sm:block">
+              <p className="text-gray-500 text-sm text-center">
+                Aucun produit enregistré pour le moment.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
