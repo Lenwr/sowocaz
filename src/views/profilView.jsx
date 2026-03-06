@@ -2,13 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
 import Modal from "../components/Modal";
 
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
-const ProductCard = ({ nom, images, prix, dimensions, onSelect }) => (
+const ProductCard = ({ id, nom, images, prix, dimensions, description, onSelect }) => (
   <div
     className="bg-white rounded-2xl shadow-md hover:shadow-xl transition p-4 cursor-pointer flex flex-col"
-    onClick={() => onSelect({ nom, images, prix, dimensions })}
+    onClick={() => onSelect({ id, nom, images, prix, dimensions, description })}
   >
     <img
       src={images?.[0]}
@@ -36,16 +36,15 @@ function normalizeProduit(p) {
         ? [p.image]
         : [];
 
-  // fallback si "nom" pas là : on utilise dimensions
   const nom = (p.nom ?? p.dimensions ?? "Produit").toString();
 
   return {
-    id: p.id ?? `${nom}-${images[0] ?? Math.random()}`,
+    id: p.id ?? null,
     nom,
     images,
     prix: p.prix ?? "",
     dimensions: p.dimensions ?? "",
-    // champs numériques si dispo (créés par AdminDashboard)
+    description: p.description ?? "",
     largeur: typeof p.largeur === "number" ? p.largeur : null,
     hauteur: typeof p.hauteur === "number" ? p.hauteur : null,
     profondeur: typeof p.profondeur === "number" ? p.profondeur : null,
@@ -65,7 +64,6 @@ function parseDims(str) {
 
   const s = String(str).replace(",", ".").toLowerCase().trim();
 
-  // cas "85L/200H"
   const m1 = s.match(/(\d+(?:\.\d+)?)\s*l\s*\/\s*(\d+(?:\.\d+)?)\s*h/);
   if (m1) {
     const w = Number(m1[1]);
@@ -73,7 +71,6 @@ function parseDims(str) {
     return { w, h, d: null, volume: null };
   }
 
-  // cas "l 30 x l 20 x h 10"
   const hasLetters = /[ldh]/.test(s);
   if (hasLetters) {
     const wMatch = s.match(/(?:^|[\s/])l\s*[:=]?\s*(\d+(?:\.\d+)?)/);
@@ -88,7 +85,6 @@ function parseDims(str) {
     return { w, h, d, volume };
   }
 
-  // fallback 3 nombres
   const nums = s.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
   const w = nums[0] ?? null;
   const d = nums[1] ?? null;
@@ -101,8 +97,9 @@ const ProductView = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [dbProduits, setDbProduits] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [savingDescription, setSavingDescription] = useState(false);
 
-  // ✅ produits en dur
+  // Produits locaux
   const localProduits = useMemo(
     () => [
       { nom: "46L/90H", images: ["/46L90HF.jpeg"], dimensions: "46L/90H" },
@@ -149,35 +146,48 @@ const ProductView = () => {
     []
   );
 
-  // ✅ Firestore
+  // Firestore
   useEffect(() => {
     const run = async () => {
       try {
         const snap = await getDocs(collection(db, "produits"));
         const list = snap.docs.map((d) => normalizeProduit({ id: d.id, ...d.data() }));
         setDbProduits(list);
+      } catch (error) {
+        console.error("Erreur chargement produits :", error);
       } finally {
         setLoading(false);
       }
     };
+
     run();
   }, []);
 
-  // ✅ merge (local + db) + dédup
+  // Merge local + db
   const allProduits = useMemo(() => {
     const normalizedLocal = localProduits.map(normalizeProduit);
     const map = new Map();
 
     [...normalizedLocal, ...dbProduits].forEach((p) => {
       const key = `${p.nom}-${p.images?.[0] ?? ""}`;
-      if (!map.has(key)) map.set(key, p);
+      if (!map.has(key)) {
+        map.set(key, p);
+      } else {
+        // priorité aux données Firestore si elles existent
+        const existing = map.get(key);
+        map.set(key, {
+          ...existing,
+          ...p,
+          description: p.description || existing.description || "",
+          id: p.id || existing.id || null,
+        });
+      }
     });
 
     return Array.from(map.values());
   }, [localProduits, dbProduits]);
 
-  // ✅ tri
-  const [sortKey, setSortKey] = useState("none"); // none | wAsc | wDesc | hAsc | hDesc | volumeAsc | volumeDesc
+  const [sortKey, setSortKey] = useState("none");
 
   const produitsAffiches = useMemo(() => {
     const arr = [...allProduits];
@@ -186,15 +196,15 @@ const ProductView = () => {
     const asc = sortKey.endsWith("Asc");
 
     const getDims = (p) => {
-      // priorité aux champs numériques (propre)
       const w = typeof p.largeur === "number" ? p.largeur : null;
       const h = typeof p.hauteur === "number" ? p.hauteur : null;
       const d = typeof p.profondeur === "number" ? p.profondeur : null;
       const v = typeof p.volume === "number" ? p.volume : null;
 
-      if (w !== null || h !== null || d !== null || v !== null) return { w, h, d, volume: v };
+      if (w !== null || h !== null || d !== null || v !== null) {
+        return { w, h, d, volume: v };
+      }
 
-      // fallback parsing string
       return parseDims(p.dimensions || p.nom);
     };
 
@@ -216,13 +226,50 @@ const ProductView = () => {
     return arr;
   }, [allProduits, sortKey]);
 
+  const handleSaveDescription = async (productId, description) => {
+    if (!productId) {
+      alert("Impossible d'enregistrer : ce produit n'existe pas dans Firestore.");
+      return;
+    }
+
+    try {
+      setSavingDescription(true);
+
+      const ref = doc(db, "produits", productId);
+      await updateDoc(ref, {
+        description: description ?? "",
+      });
+
+      setDbProduits((prev) =>
+        prev.map((item) =>
+          item.id === productId ? { ...item, description: description ?? "" } : item
+        )
+      );
+
+      setSelectedProduct((prev) =>
+        prev && prev.id === productId
+          ? { ...prev, description: description ?? "" }
+          : prev
+      );
+
+      alert("Description enregistrée avec succès.");
+    } catch (error) {
+      console.error("Erreur enregistrement description :", error);
+      alert("Erreur lors de l'enregistrement de la description.");
+    } finally {
+      setSavingDescription(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#f9fafb]">
       <Header />
 
       <main className="flex-1 container mx-auto px-6 py-10">
         <div className="flex flex-col gap-3 items-center mb-8">
-          <h2 className="text-2xl font-bold text-gray-800 text-center">Nos produits disponibles</h2>
+          <h2 className="text-2xl font-bold text-gray-800 text-center">
+            Nos produits disponibles
+          </h2>
 
           <div className="flex gap-2 flex-wrap justify-center text-black items-center">
             <select
@@ -250,7 +297,7 @@ const ProductView = () => {
         ) : (
           <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {produitsAffiches.map((p) => (
-              <ProductCard key={p.id} {...p} onSelect={setSelectedProduct} />
+              <ProductCard key={p.id ?? `${p.nom}-${p.images?.[0] ?? ""}`} {...p} onSelect={setSelectedProduct} />
             ))}
           </section>
         )}
@@ -279,7 +326,12 @@ const ProductView = () => {
         </div>
       </footer>
 
-      <Modal product={selectedProduct} onClose={() => setSelectedProduct(null)} />
+      <Modal
+        product={selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+        onSaveDescription={handleSaveDescription}
+        saving={savingDescription}
+      />
     </div>
   );
 };
