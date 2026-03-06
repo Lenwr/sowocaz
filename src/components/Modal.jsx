@@ -1,14 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const Modal = ({ product, onClose, onSaveDescription, saving = false }) => {
-  const [description, setDescription] = useState("");
-
-  useEffect(() => {
-    if (product) {
-      setDescription(product.description || "");
-    }
-  }, [product]);
+const Modal = ({ product, onClose }) => {
+  const [activeImage, setActiveImage] = useState(0);
 
   return (
     <AnimatePresence>
@@ -21,7 +15,7 @@ const Modal = ({ product, onClose, onSaveDescription, saving = false }) => {
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-white rounded-2xl shadow-xl w-11/12 max-w-lg p-6 cursor-default max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-2xl shadow-xl w-11/12 max-w-2xl p-6 cursor-default"
             initial={{ scale: 0.9 }}
             animate={{ scale: 1 }}
             exit={{ scale: 0.9 }}
@@ -30,42 +24,48 @@ const Modal = ({ product, onClose, onSaveDescription, saving = false }) => {
               {product.nom}
             </h2>
 
-            <div className="flex overflow-x-auto gap-3 pb-2">
-              {product.images?.map((src, i) => (
-                <img
-                  key={i}
-                  src={src}
-                  alt={`${product.nom} image ${i + 1}`}
-                  className="h-64 w-48 rounded-xl object-cover flex-shrink-0"
-                />
-              ))}
-            </div>
-
-            {product.dimensions ? (
-              <p className="text-sm text-gray-500 mt-4">
-                <span className="font-semibold">Dimensions :</span> {product.dimensions}
-              </p>
-            ) : null}
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Description du produit
-              </label>
-
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Ex : ouvrant droit"
-                rows={4}
-                className="w-full border border-gray-300 rounded-xl p-3 text-sm text-gray-700 outline-none focus:ring-2 focus:ring-[#07c2e5] resize-none"
+            {/* Image principale */}
+            <div className="w-full rounded-xl overflow-hidden border mb-3">
+              <img
+                src={product.images?.[activeImage]}
+                alt={product.nom}
+                className="w-full h-96 object-contain bg-white"
               />
             </div>
 
+            {/* Miniatures */}
+            {product.images?.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {product.images.map((src, i) => (
+                  <img
+                    key={i}
+                    src={src}
+                    alt=""
+                    onClick={() => setActiveImage(i)}
+                    className={`h-20 w-16 rounded-lg object-cover cursor-pointer border ${
+                      activeImage === i
+                        ? "border-[#07c2e5]"
+                        : "border-gray-200"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Description */}
+            {product.description && (
+              <p className="text-gray-700 mt-4 text-sm">
+                {product.description}
+              </p>
+            )}
+
+            {/* Prix */}
             <span className="block mt-3 text-[#07c2e5] font-bold text-lg">
-              {product.prix || "—"}
+              {product.prix}
             </span>
 
-            <div className="flex justify-between mt-5 gap-2 flex-wrap">
+            {/* Actions */}
+            <div className="flex justify-between mt-5">
               <a href="tel:0781701384">
                 <button className="bg-gray-100 text-black px-4 py-2 rounded-lg hover:scale-105 transition">
                   Appeler
@@ -81,14 +81,6 @@ const Modal = ({ product, onClose, onSaveDescription, saving = false }) => {
                   WhatsApp
                 </button>
               </a>
-
-              <button
-                onClick={() => onSaveDescription(product.id, description)}
-                disabled={saving}
-                className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition disabled:opacity-50"
-              >
-                {saving ? "Enregistrement..." : "Enregistrer"}
-              </button>
 
               <button
                 onClick={onClose}

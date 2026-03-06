@@ -5,7 +5,15 @@ import Modal from "../components/Modal";
 import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
-const ProductCard = ({ id, nom, images, prix, dimensions, description, onSelect }) => (
+const ProductCard = ({
+  id,
+  nom,
+  images,
+  prix,
+  dimensions,
+  description,
+  onSelect,
+}) => (
   <div
     className="bg-white rounded-2xl shadow-md hover:shadow-xl transition p-4 cursor-pointer flex flex-col"
     onClick={() => onSelect({ id, nom, images, prix, dimensions, description })}
@@ -23,7 +31,11 @@ const ProductCard = ({ id, nom, images, prix, dimensions, description, onSelect 
       <p className="text-xs text-gray-500 mt-1">📏 {dimensions}</p>
     ) : null}
 
-    <span className="text-[#07c2e5] font-bold mt-2">{prix || "—"}</span>
+    {description ? (
+      <p className="text-sm text-gray-600 mt-2 line-clamp-2">{description}</p>
+    ) : null}
+
+    <span className="text-[#07c2e5] font-bold mt-3">{prix || "—"}</span>
   </div>
 );
 
@@ -100,58 +112,16 @@ const ProductView = () => {
   const [savingDescription, setSavingDescription] = useState(false);
 
   // Produits locaux
-  const localProduits = useMemo(
-    () => [
-      { nom: "46L/90H", images: ["/46L90HF.jpeg"], dimensions: "46L/90H" },
-      {
-        nom: "85L/200H",
-        images: ["/85L200HF.jpeg", "/85L200HFBLANC.jpeg", "/85L200HFOD.jpeg", "/85L200HFOG.jpeg"],
-        dimensions: "85L/200H",
-      },
-      { nom: "96L/92H", images: ["/96L92HF.jpeg"], dimensions: "96L/92H" },
-      { nom: "100L/130H", images: ["/100L130H.jpeg"], dimensions: "100L/130H" },
-      {
-        nom: "100L/215H",
-        images: [
-          "/100L215HBLANC.jpeg",
-          "/100L215HGRIS.jpeg",
-          "/100L215HMARRON.jpeg",
-          "/100L215HNOIR.jpeg",
-          "/100L215HNOIR2.jpeg",
-          "/100L215HNOIR3.jpeg",
-        ],
-        dimensions: "100L/215H",
-      },
-      { nom: "106L/162H", images: ["/106L162HF.jpeg"], dimensions: "106L/162H" },
-      { nom: "115L/112H", images: ["/115L112HF.jpeg"], dimensions: "115L/112H" },
-      { nom: "130L/130H", images: ["/130L130HF.jpeg"], dimensions: "130L/130H" },
-      { nom: "130L/205H", images: ["/130L205HF.jpeg"], dimensions: "130L/205H" },
-      { nom: "130L/206H", images: ["/130L206HF.jpeg"], dimensions: "130L/206H" },
-      {
-        nom: "130L/215H",
-        images: ["/130L215HMARRON.jpeg", "/130L215HNOIR.jpeg"],
-        dimensions: "130L/215H",
-      },
-      { nom: "140L/164H", images: ["/140L164HF.jpeg"], dimensions: "140L/164H" },
-      { nom: "183L/128H", images: ["/183L128HF.jpeg"], dimensions: "183L/128H" },
-      { nom: "186L/140H", images: ["/186L140HF.jpeg"], dimensions: "186L/140H" },
-      {
-        nom: "190L/205H",
-        images: ["/190L205HF.jpeg", "/190L205HF2.jpeg", "/190L205HF3.jpeg"],
-        dimensions: "190L/205H",
-      },
-      { nom: "212L/164H", images: ["/212L164HF.jpeg"], dimensions: "212L/164H" },
-      { nom: "300L/140H", images: ["/300L140HF.jpeg"], dimensions: "300L/140H" },
-    ],
-    []
-  );
+ 
 
   // Firestore
   useEffect(() => {
     const run = async () => {
       try {
         const snap = await getDocs(collection(db, "produits"));
-        const list = snap.docs.map((d) => normalizeProduit({ id: d.id, ...d.data() }));
+        const list = snap.docs.map((d) =>
+          normalizeProduit({ id: d.id, ...d.data() })
+        );
         setDbProduits(list);
       } catch (error) {
         console.error("Erreur chargement produits :", error);
@@ -165,15 +135,13 @@ const ProductView = () => {
 
   // Merge local + db
   const allProduits = useMemo(() => {
-    const normalizedLocal = localProduits.map(normalizeProduit);
     const map = new Map();
 
-    [...normalizedLocal, ...dbProduits].forEach((p) => {
+    [...dbProduits].forEach((p) => {
       const key = `${p.nom}-${p.images?.[0] ?? ""}`;
       if (!map.has(key)) {
         map.set(key, p);
       } else {
-        // priorité aux données Firestore si elles existent
         const existing = map.get(key);
         map.set(key, {
           ...existing,
@@ -185,7 +153,7 @@ const ProductView = () => {
     });
 
     return Array.from(map.values());
-  }, [localProduits, dbProduits]);
+  }, [ dbProduits]);
 
   const [sortKey, setSortKey] = useState("none");
 
@@ -242,7 +210,9 @@ const ProductView = () => {
 
       setDbProduits((prev) =>
         prev.map((item) =>
-          item.id === productId ? { ...item, description: description ?? "" } : item
+          item.id === productId
+            ? { ...item, description: description ?? "" }
+            : item
         )
       );
 
@@ -297,7 +267,11 @@ const ProductView = () => {
         ) : (
           <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {produitsAffiches.map((p) => (
-              <ProductCard key={p.id ?? `${p.nom}-${p.images?.[0] ?? ""}`} {...p} onSelect={setSelectedProduct} />
+              <ProductCard
+                key={p.id ?? `${p.nom}-${p.images?.[0] ?? ""}`}
+                {...p}
+                onSelect={setSelectedProduct}
+              />
             ))}
           </section>
         )}
@@ -307,7 +281,10 @@ const ProductView = () => {
         <div className="container mx-auto text-center space-y-2">
           <p>
             📞 07 81 70 13 84 —{" "}
-            <a href="mailto:bohoumecoly@hotmail.fr" className="text-[#07c2e5] underline">
+            <a
+              href="mailto:bohoumecoly@hotmail.fr"
+              className="text-[#07c2e5] underline"
+            >
               bohoumecoly@hotmail.fr
             </a>
           </p>
