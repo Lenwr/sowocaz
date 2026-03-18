@@ -6,79 +6,64 @@ import {
   deleteDoc,
   doc,
   updateDoc,
+  getDoc,
+  query,
+  orderBy,
+  limit,
 } from "firebase/firestore";
 import { db, storage, auth } from "../firebaseConfig";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 
-/** Extract dims -> numbers (pour tri/firestore) */
-const extractDims = (dimensions) => {
-  if (!dimensions) {
-    return { largeur: null, hauteur: null, profondeur: null, volume: null };
-  }
+import AdminSidebar from "../Admin/AdminSidebar";
+import DashboardTopbar from "../admin/DashboardTopbar";
+import DashboardStats from "../admin/DashboardStats";
+import ProductForm from "../admin/ProductForm";
+import ProductsSection from "../admin/ProductsSection";
+import StockAlertsPanel from "../admin/StockAlertsPanel";
+import StockHistorySection from "../admin/StockHistorySection";
+import StockMovementModal from "../admin/StockMovementModal";
 
-  const s = String(dimensions).replace(",", ".").toLowerCase().trim();
-
-  // "85L/200H"
-  const m1 = s.match(/(\d+(?:\.\d+)?)\s*l\s*\/\s*(\d+(?:\.\d+)?)\s*h/);
-  if (m1) {
-    const largeur = Number(m1[1]);
-    const hauteur = Number(m1[2]);
-    return { largeur, hauteur, profondeur: null, volume: null };
-  }
-
-  // "L 30 x l 20 x H 10"
-  const hasLetters = /[ldh]/.test(s);
-  if (hasLetters) {
-    const wMatch = s.match(/(?:^|[\s/])l\s*[:=]?\s*(\d+(?:\.\d+)?)/);
-    const dMatch = s.match(/(?:^|[\s/])d\s*[:=]?\s*(\d+(?:\.\d+)?)/);
-    const hMatch = s.match(/(?:^|[\s/])h\s*[:=]?\s*(\d+(?:\.\d+)?)/);
-
-    const largeur = wMatch ? Number(wMatch[1]) : null;
-    const profondeur = dMatch ? Number(dMatch[1]) : null;
-    const hauteur = hMatch ? Number(hMatch[1]) : null;
-
-    const volume =
-      largeur && hauteur && profondeur ? largeur * hauteur * profondeur : null;
-
-    return { largeur, hauteur, profondeur, volume };
-  }
-
-  // fallback 3 nombres: 30x20x10
-  const nums = s.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-  const largeur = nums[0] ?? null;
-  const profondeur = nums[1] ?? null;
-  const hauteur = nums[2] ?? null;
-  const volume =
-    largeur && hauteur && profondeur ? largeur * hauteur * profondeur : null;
-
-  return { largeur, hauteur, profondeur, volume };
-};
+import { extractDims, getStockStatus } from "../utils/inventoryUtils";
 
 const AdminDashboard = () => {
   const [produits, setProduits] = useState([]);
+  const [mouvements, setMouvements] = useState([]);
+  const [activeSection, setActiveSection] = useState("overview");
+
   const [form, setForm] = useState({
     dimensions: "",
     image: "",
     images: [],
     prix: "",
     description: "",
+    stock: "0",
+    stockMin: "1",
   });
 
   const [editId, setEditId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState([]);
+  const [search, setSearch] = useState("");
+  const [stockFilter, setStockFilter] = useState("all");
 
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState(null);
 
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [selectedProduit, setSelectedProduit] = useState(null);
+  const [stockModalType, setStockModalType] = useState("entree");
+  const [stockModalLoading, setStockModalLoading] = useState(false);
+
   const produitsRef = useMemo(() => collection(db, "produits"), []);
+  const mouvementsRef = useMemo(() => collection(db, "mouvementsStock"), []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       setAuthReady(true);
-      console.log("AUTH STATE:", user ? `✅ ${user.uid}` : "❌ null");
     });
     return () => unsub();
   }, []);
@@ -86,14 +71,53 @@ const AdminDashboard = () => {
   const fetchProduits = async () => {
     const snapshot = await getDocs(produitsRef);
     const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-    list.sort((a, b) => (a.dimensions || "").localeCompare(b.dimensions || ""));
+
+    list.sort((a, b) => {
+      const aStatus = getStockStatus(a.stock ?? 0, a.stockMin ?? 1);
+      const bStatus = getStockStatus(b.stock ?? 0, b.stockMin ?? 1);
+
+      const order = { rupture: 0, faible: 1, en_stock: 2 };
+      if (order[aStatus] !== order[bStatus]) {
+        return order[aStatus] - order[bStatus];
+      }
+
+      return (a.dimensions || "").localeCompare(b.dimensions || "");
+    });
+
     setProduits(list);
+  };
+
+  const fetchMouvements = async () => {
+    try {
+      const qRef = query(mouvementsRef, orderBy("createdAt", "desc"), limit(10));
+      const snapshot = await getDocs(qRef);
+      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setMouvements(list);
+    } catch (err) {
+      console.error("Erreur fetch mouvements:", err);
+      setMouvements([]);
+    }
   };
 
   useEffect(() => {
     fetchProduits();
+    fetchMouvements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const resetForm = () => {
+    setEditId(null);
+    setForm({
+      dimensions: "",
+      image: "",
+      images: [],
+      prix: "",
+      description: "",
+      stock: "0",
+      stockMin: "1",
+    });
+    setPreview([]);
+  };
 
   const handleChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -104,9 +128,10 @@ const AdminDashboard = () => {
     if (!files.length) return;
 
     setUploading(true);
-
     const localPreviews = files.map((file) => URL.createObjectURL(file));
     setPreview(localPreviews);
+
+    const toastId = toast.loading("Upload des images...");
 
     try {
       const uploadedUrls = [];
@@ -128,10 +153,12 @@ const AdminDashboard = () => {
         images: uploadedUrls,
       }));
 
-      alert("✅ Images uploadées avec succès !");
+      toast.success("Images uploadées avec succès !", { id: toastId });
     } catch (err) {
       console.error("🔥 Storage upload failed:", err);
-      alert(`❌ Storage: ${err?.code || ""} ${err?.message || err}`);
+      toast.error(`Storage: ${err?.code || ""} ${err?.message || err}`, {
+        id: toastId,
+      });
     } finally {
       setUploading(false);
     }
@@ -159,16 +186,19 @@ const AdminDashboard = () => {
           : [];
 
     if (!form.dimensions.trim() || !currentImages.length || !form.prix.trim()) {
-      alert("⚠️ Dimensions, au moins une image et prix sont obligatoires !");
+      toast.error("Dimensions, au moins une image et prix sont obligatoires !");
       return;
     }
 
     if (!auth.currentUser) {
-      alert("❌ Tu n'es pas connecté Firebase Auth. Firestore va refuser.");
+      toast.error("Tu n'es pas connecté Firebase Auth.");
       return;
     }
 
     const dims = extractDims(form.dimensions.trim());
+    const stockValue = Math.max(0, Number(form.stock) || 0);
+    const stockMinValue = Math.max(0, Number(form.stockMin) || 0);
+    const statutStock = getStockStatus(stockValue, stockMinValue);
 
     const data = {
       dimensions: form.dimensions.trim(),
@@ -176,6 +206,9 @@ const AdminDashboard = () => {
       images: currentImages,
       prix: form.prix.trim(),
       description: form.description.trim(),
+      stock: stockValue,
+      stockMin: stockMinValue,
+      statutStock,
       ...dims,
       createdAt: editId ? undefined : Date.now(),
       updatedAt: Date.now(),
@@ -183,28 +216,41 @@ const AdminDashboard = () => {
 
     Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
 
+    const toastId = toast.loading(editId ? "Mise à jour du produit..." : "Ajout du produit...");
+
     try {
       if (editId) {
         await updateDoc(doc(db, "produits", editId), data);
-        setEditId(null);
-        alert("✅ Produit mis à jour !");
+        toast.success("Produit mis à jour !", { id: toastId });
       } else {
-        await addDoc(collection(db, "produits"), data);
-        alert("✅ Produit ajouté !");
+        const created = await addDoc(collection(db, "produits"), data);
+
+        if (stockValue > 0) {
+          await addDoc(collection(db, "mouvementsStock"), {
+            produitId: created.id,
+            produitLabel: form.dimensions.trim(),
+            type: "entree",
+            quantite: stockValue,
+            commentaire: "Stock initial",
+            createdAt: Date.now(),
+            createdBy: auth.currentUser?.uid || null,
+            createdByEmail: auth.currentUser?.email || null,
+            previousStock: 0,
+            newStock: stockValue,
+          });
+        }
+
+        toast.success("Produit ajouté !", { id: toastId });
       }
 
-      setForm({
-        dimensions: "",
-        image: "",
-        images: [],
-        prix: "",
-        description: "",
-      });
-      setPreview([]);
+      resetForm();
       await fetchProduits();
+      await fetchMouvements();
     } catch (err) {
       console.error("🔥 Firestore write failed:", err);
-      alert(`❌ Firestore: ${err?.code || ""} ${err?.message || err}`);
+      toast.error(`Firestore: ${err?.code || ""} ${err?.message || err}`, {
+        id: toastId,
+      });
     }
   };
 
@@ -222,22 +268,125 @@ const AdminDashboard = () => {
       images: existingImages,
       prix: p.prix || "",
       description: p.description || "",
+      stock: String(p.stock ?? 0),
+      stockMin: String(p.stockMin ?? 1),
     });
 
     setPreview(existingImages);
     setEditId(p.id);
+    setActiveSection("products");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Voulez-vous vraiment supprimer ce produit ?")) return;
+    if (!window.confirm("Voulez-vous vraiment supprimer ce produit ?")) return;
+
+    const toastId = toast.loading("Suppression du produit...");
 
     try {
       await deleteDoc(doc(db, "produits", id));
       await fetchProduits();
+      await fetchMouvements();
+      toast.success("Produit supprimé", { id: toastId });
     } catch (err) {
       console.error("🔥 Firestore delete failed:", err);
-      alert(`❌ Firestore delete: ${err?.code || ""} ${err?.message || err}`);
+      toast.error(`Firestore delete: ${err?.code || ""} ${err?.message || err}`, {
+        id: toastId,
+      });
+    }
+  };
+
+  const handleOpenStockModal = (produit, type = "entree") => {
+    setSelectedProduit(produit);
+    setStockModalType(type);
+    setStockModalOpen(true);
+  };
+
+  const handleCloseStockModal = () => {
+    if (stockModalLoading) return;
+    setStockModalOpen(false);
+    setSelectedProduit(null);
+    setStockModalType("entree");
+  };
+
+  const handleStockMovementConfirm = async ({ type, quantite, commentaire }) => {
+    if (!selectedProduit) return;
+
+    const qty = Number(quantite);
+
+    if (!qty || qty <= 0) {
+      toast.error("Quantité invalide");
+      return;
+    }
+
+    setStockModalLoading(true);
+    const toastId = toast.loading("Mise à jour du stock...");
+
+    try {
+      const refDoc = doc(db, "produits", selectedProduit.id);
+      const snap = await getDoc(refDoc);
+
+      if (!snap.exists()) {
+        toast.error("Produit introuvable", { id: toastId });
+        setStockModalLoading(false);
+        return;
+      }
+
+      const produit = { id: snap.id, ...snap.data() };
+      const currentStock = produit.stock ?? 0;
+
+      let newStock = currentStock;
+
+      if (type === "entree") {
+        newStock = currentStock + qty;
+      } else if (type === "sortie") {
+        if (currentStock - qty < 0) {
+          toast.error("Stock insuffisant", { id: toastId });
+          setStockModalLoading(false);
+          return;
+        }
+        newStock = currentStock - qty;
+      } else if (type === "correction") {
+        newStock = qty;
+      }
+
+      const newStatus = getStockStatus(newStock, produit.stockMin ?? 1);
+
+      await updateDoc(refDoc, {
+        stock: newStock,
+        statutStock: newStatus,
+        updatedAt: Date.now(),
+      });
+
+      await addDoc(collection(db, "mouvementsStock"), {
+        produitId: produit.id,
+        produitLabel: produit.dimensions || "",
+        type,
+        quantite: qty,
+        commentaire:
+          commentaire ||
+          (type === "entree"
+            ? "Réception stock"
+            : type === "sortie"
+              ? "Vente produit"
+              : `Correction stock (${currentStock} → ${newStock})`),
+        createdAt: Date.now(),
+        createdBy: auth.currentUser?.uid || null,
+        createdByEmail: auth.currentUser?.email || null,
+        previousStock: currentStock,
+        newStock,
+      });
+
+      await fetchProduits();
+      await fetchMouvements();
+
+      toast.success("Mouvement enregistré", { id: toastId });
+      handleCloseStockModal();
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de la mise à jour", { id: toastId });
+    } finally {
+      setStockModalLoading(false);
     }
   };
 
@@ -247,378 +396,131 @@ const AdminDashboard = () => {
     window.location.href = "/login";
   };
 
+  const filteredProduits = useMemo(() => {
+    return produits.filter((p) => {
+      const status = getStockStatus(p.stock ?? 0, p.stockMin ?? 1);
+
+      const matchesSearch =
+        !search.trim() ||
+        (p.dimensions || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.description || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.prix || "").toLowerCase().includes(search.toLowerCase());
+
+      const matchesFilter = stockFilter === "all" ? true : status === stockFilter;
+      return matchesSearch && matchesFilter;
+    });
+  }, [produits, search, stockFilter]);
+
+  const stats = useMemo(() => {
+    const totalProduits = produits.length;
+    const totalStock = produits.reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
+    const ruptures = produits.filter(
+      (p) => getStockStatus(p.stock ?? 0, p.stockMin ?? 1) === "rupture"
+    ).length;
+    const faibles = produits.filter(
+      (p) => getStockStatus(p.stock ?? 0, p.stockMin ?? 1) === "faible"
+    ).length;
+
+    return { totalProduits, totalStock, ruptures, faibles };
+  }, [produits]);
+
+  const alertProducts = useMemo(() => {
+    return produits.filter((p) => {
+      const status = getStockStatus(p.stock ?? 0, p.stockMin ?? 1);
+      return status === "rupture" || status === "faible";
+    });
+  }, [produits]);
+
   return (
-    <div className="min-h-screen bg-[#f9fafb]">
-      <div className="sticky top-0 z-20 bg-[#f9fafb]/80 backdrop-blur border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-[#0d0d1a]">
-              Dashboard Sow Ocaz ⚙️
-            </h1>
-            <p className="text-xs sm:text-sm text-gray-500">
-              Gestion des produits (dimensions / prix / images / description)
-            </p>
-          </div>
+    <>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            borderRadius: "14px",
+            background: "#0f172a",
+            color: "#fff",
+          },
+        }}
+      />
 
-          <button
-            onClick={handleLogout}
-            className="text-sm text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg"
-          >
-            🔐 Déconnexion
-          </button>
-        </div>
-      </div>
+      <div className="min-h-screen bg-slate-100 text-slate-900">
+        <div className="flex min-h-screen">
+          <AdminSidebar
+            activeSection={activeSection}
+            setActiveSection={setActiveSection}
+            stats={stats}
+            handleLogout={handleLogout}
+          />
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-        <div className="mb-6">
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <p className="text-gray-700">
-              {authReady ? (
-                authUser ? (
-                  <span className="text-green-600 font-semibold">
-                    connecté ({authUser.email || authUser.uid})
-                  </span>
-                ) : (
-                  <span className="text-red-600 font-semibold">non connecté</span>
-                )
-              ) : (
-                <span className="text-gray-500">chargement…</span>
-              )}
-            </p>
-          </div>
-        </div>
+          <main className="flex-1">
+            <DashboardTopbar
+              activeSection={activeSection}
+              authReady={authReady}
+              authUser={authUser}
+              setActiveSection={setActiveSection}
+            />
 
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-6 mb-8">
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-                {editId ? "✏️ Modifier un produit" : "➕ Ajouter un produit"}
-              </h2>
-              <p className="text-xs sm:text-sm text-gray-500">
-                Champs obligatoires : dimensions, prix, au moins une image
-              </p>
-            </div>
+            <div className="px-4 py-6 sm:px-6">
+              {(activeSection === "overview" || activeSection === "products") && (
+                <div className="space-y-6">
+                  <DashboardStats stats={stats} />
 
-            {editId && (
-              <button
-                type="button"
-                onClick={() => {
-                  setEditId(null);
-                  setForm({
-                    dimensions: "",
-                    image: "",
-                    images: [],
-                    prix: "",
-                    description: "",
-                  });
-                  setPreview([]);
-                }}
-                className="text-xs sm:text-sm text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 px-3 py-2 rounded-lg"
-              >
-                Annuler
-              </button>
-            )}
-          </div>
+                  <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.1fr_1.3fr_0.9fr]">
+                    <ProductForm
+                      form={form}
+                      setForm={setForm}
+                      handleChange={handleChange}
+                      handleFileUpload={handleFileUpload}
+                      handleRemoveImage={handleRemoveImage}
+                      handleSave={handleSave}
+                      uploading={uploading}
+                      preview={preview}
+                      editId={editId}
+                      resetForm={resetForm}
+                    />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-gray-700">
-                Dimensions *
-              </label>
-              <input
-                type="text"
-                name="dimensions"
-                value={form.dimensions}
-                onChange={handleChange}
-                placeholder='Ex : "85L/200H"'
-                className="mt-1 border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40"
-              />
-            </div>
+                    <ProductsSection
+                      filteredProduits={filteredProduits}
+                      search={search}
+                      setSearch={setSearch}
+                      stockFilter={stockFilter}
+                      setStockFilter={setStockFilter}
+                      handleOpenStockModal={handleOpenStockModal}
+                      handleEdit={handleEdit}
+                      handleDelete={handleDelete}
+                    />
 
-            <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-gray-700">Prix *</label>
-              <input
-                type="text"
-                name="prix"
-                value={form.prix}
-                onChange={handleChange}
-                placeholder="Ex : 200 €"
-                className="mt-1 border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-gray-700">
-                Description
-              </label>
-              <textarea
-                name="description"
-                value={form.description}
-                onChange={handleChange}
-                placeholder="Ex : ouvrant droit"
-                rows={4}
-                className="mt-1 border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40 resize-none"
-              />
-            </div>
-
-            <div className="sm:col-span-2 border border-gray-200 rounded-2xl p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Images *</p>
-                  <p className="text-xs text-gray-500">
-                    Upload multiple Storage ou ajoute plusieurs URLs plus tard
-                  </p>
-                </div>
-
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handleFileUpload}
-                  className="text-sm text-gray-900"
-                />
-              </div>
-
-              {uploading && (
-                <p className="text-xs text-gray-500 mt-2">Upload en cours...</p>
-              )}
-
-              {(preview.length > 0 || form.images.length > 0 || form.image) && (
-                <div className="mt-4">
-                  <p className="text-xs font-medium text-gray-500 mb-2">
-                    Aperçu images
-                  </p>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                    {(preview.length > 0
-                      ? preview
-                      : form.images.length > 0
-                        ? form.images
-                        : form.image
-                          ? [form.image]
-                          : []
-                    ).map((src, index) => (
-                      <div
-                        key={`${src}-${index}`}
-                        className="relative overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
-                      >
-                        <img
-                          src={src}
-                          alt={`aperçu ${index + 1}`}
-                          className="w-full h-36 sm:h-44 object-contain bg-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveImage(index)}
-                          className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-lg"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                    <div className="space-y-6">
+                      <StockAlertsPanel alertProducts={alertProducts} />
+                      <StockHistorySection
+                        mouvements={mouvements}
+                        compact
+                        setActiveSection={setActiveSection}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
 
-              <div className="mt-4">
-                <input
-                  type="text"
-                  name="image"
-                  placeholder="URL image principale (optionnel si upload déjà fait)"
-                  value={form.image}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      image: e.target.value,
-                      images:
-                        prev.images.length > 0
-                          ? prev.images
-                          : e.target.value.trim()
-                            ? [e.target.value.trim()]
-                            : [],
-                    }))
-                  }
-                  className="border border-gray-300 rounded-lg w-full p-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#07c2e5]/40"
-                />
-              </div>
+              {activeSection === "history" && (
+                <StockHistorySection mouvements={mouvements} />
+              )}
             </div>
-
-            <div className="sm:col-span-2">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={uploading}
-                className="bg-[#07c2e5] text-white px-4 py-3 rounded-xl w-full hover:bg-[#06a0bd] transition disabled:opacity-50 font-semibold"
-              >
-                {editId ? "💾 Enregistrer" : "🚀 Ajouter"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="mb-10">
-          <div className="flex items-end justify-between gap-4 mb-4">
-            <h2 className="font-semibold text-base sm:text-lg text-gray-800">
-              🧾 Produits enregistrés ({produits.length})
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:hidden gap-4">
-            {produits.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center">
-                Aucun produit enregistré pour le moment.
-              </p>
-            ) : (
-              produits.map((p) => {
-                const productImages =
-                  Array.isArray(p.images) && p.images.length
-                    ? p.images
-                    : p.image
-                      ? [p.image]
-                      : [];
-
-                return (
-                  <div
-                    key={p.id}
-                    className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm"
-                  >
-                    <div className="flex gap-3">
-                      {productImages[0] ? (
-                        <img
-                          src={productImages[0]}
-                          alt={p.dimensions}
-                          className="w-20 h-20 object-cover rounded-xl border"
-                        />
-                      ) : (
-                        <div className="w-20 h-20 rounded-xl border bg-gray-50" />
-                      )}
-
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">
-                          {p.dimensions || "—"}
-                        </p>
-                        <p className="text-sm text-[#07c2e5] font-bold mt-1">
-                          {p.prix || "—"}
-                        </p>
-                        {p.description ? (
-                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                            {p.description}
-                          </p>
-                        ) : null}
-                        <p className="text-xs text-gray-500 mt-1">
-                          {productImages.length} image(s)
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          ID: <span className="font-mono">{p.id}</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 mt-4">
-                      <button
-                        type="button"
-                        onClick={() => handleEdit(p)}
-                        className="flex-1 border border-gray-200 bg-white hover:bg-gray-50 text-gray-800 px-3 py-2 rounded-xl text-sm"
-                      >
-                        ✏️ Modifier
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(p.id)}
-                        className="flex-1 border border-red-200 bg-white hover:bg-red-50 text-red-600 px-3 py-2 rounded-xl text-sm"
-                      >
-                        🗑️ Supprimer
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {produits.length > 0 && (
-            <div className="hidden sm:block overflow-x-auto bg-white border border-gray-200 rounded-2xl shadow-sm">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-gray-700">
-                  <tr>
-                    <th className="text-left p-3">Image</th>
-                    <th className="text-left p-3">Dimensions</th>
-                    <th className="text-left p-3">Prix</th>
-                    <th className="text-left p-3">Description</th>
-                    <th className="text-left p-3">Nb images</th>
-                    <th className="text-right p-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {produits.map((p) => {
-                    const productImages =
-                      Array.isArray(p.images) && p.images.length
-                        ? p.images
-                        : p.image
-                          ? [p.image]
-                          : [];
-
-                    return (
-                      <tr key={p.id} className="hover:bg-gray-50">
-                        <td className="p-3">
-                          {productImages[0] ? (
-                            <img
-                              src={productImages[0]}
-                              alt={p.dimensions}
-                              className="h-12 w-12 object-cover rounded-lg border"
-                            />
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="p-3 font-medium text-gray-900">
-                          {p.dimensions || "—"}
-                        </td>
-                        <td className="p-3 text-[#07c2e5] font-semibold">
-                          {p.prix || "—"}
-                        </td>
-                        <td className="p-3 text-gray-600 max-w-xs">
-                          <div className="truncate">{p.description || "—"}</div>
-                        </td>
-                        <td className="p-3 text-gray-600">
-                          {productImages.length}
-                        </td>
-                        <td className="p-3">
-                          <div className="flex justify-end gap-3">
-                            <button
-                              type="button"
-                              onClick={() => handleEdit(p)}
-                              className="text-[#07c2e5] hover:underline"
-                            >
-                              ✏️ Modifier
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(p.id)}
-                              className="text-red-500 hover:underline"
-                            >
-                              🗑️ Supprimer
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {produits.length === 0 && (
-            <div className="hidden sm:block">
-              <p className="text-gray-500 text-sm text-center">
-                Aucun produit enregistré pour le moment.
-              </p>
-            </div>
-          )}
+          </main>
         </div>
       </div>
-    </div>
+
+      <StockMovementModal
+        isOpen={stockModalOpen}
+        onClose={handleCloseStockModal}
+        produit={selectedProduit}
+        defaultType={stockModalType}
+        onConfirm={handleStockMovementConfirm}
+        loading={stockModalLoading}
+      />
+    </>
   );
 };
 
