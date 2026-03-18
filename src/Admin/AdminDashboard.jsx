@@ -19,12 +19,12 @@ import toast from "react-hot-toast";
 
 import AdminSidebar from "../Admin/AdminSidebar";
 import DashboardTopbar from "../Admin/DashboardTopbar";
-import DashboardStats from "../admin/DashboardStats";
-import ProductForm from "../admin/ProductForm";
-import ProductsSection from "../admin/ProductsSection";
-import StockAlertsPanel from "../admin/StockAlertsPanel";
-import StockHistorySection from "../admin/StockHistorySection";
-import StockMovementModal from "../admin/StockMovementModal";
+import DashboardStats from "../Admin/DashboardStats";
+import ProductForm from "../Admin/ProductForm";
+import ProductsSection from "../Admin/ProductsSection";
+import StockAlertsPanel from "../Admin/StockAlertsPanel";
+import StockHistorySection from "../Admin/StockHistorySection";
+import StockMovementModal from "../Admin/StockMovementModal";
 
 import { extractDims, getStockStatus } from "../utils/inventoryUtils";
 
