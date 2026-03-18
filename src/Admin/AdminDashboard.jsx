@@ -18,7 +18,7 @@ import { Toaster } from "react-hot-toast";
 import toast from "react-hot-toast";
 
 import AdminSidebar from "../Admin/AdminSidebar";
-import DashboardTopbar from "../admin/DashboardTopbar";
+import DashboardTopbar from "../Admin/DashboardTopbar";
 import DashboardStats from "../admin/DashboardStats";
 import ProductForm from "../admin/ProductForm";
 import ProductsSection from "../admin/ProductsSection";

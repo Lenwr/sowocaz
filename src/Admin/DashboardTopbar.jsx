@@ -26,7 +26,7 @@ const DashboardTopbar = ({ activeSection, authReady, authUser, onAddProduct }) =
                 <span className="font-medium text-red-600">❌ non connecté</span>
               )
             ) : (
-              <span className="text-slate-400">chargement…</span>
+              <span className="text-slate-400">chargement….</span>
             )}
           </div>
 
