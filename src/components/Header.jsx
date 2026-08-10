@@ -7,7 +7,7 @@ const Header = () => (
         <img
           src="/soLogo.png"
           alt="Sow Ocaz"
-          className="w-14 h-14 rounded-full shadow-lg"
+          className="w-32 h-auto rounded-lg shadow-lg"
         />
         <h1 className="text-xl font-bold">Sow Ocaz</h1>
       </div>

@@ -35,7 +35,7 @@ const LoginPage = () => {
         <img
           src="/soLogo.png"
           alt="Sow Ocaz"
-          className="w-16 h-16 mx-auto rounded-full mb-4 shadow-md"
+          className="w-56 h-auto mx-auto rounded-lg mb-4 shadow-md"
         />
 
         <h2 className="text-xl font-bold mb-2 text-gray-800">
